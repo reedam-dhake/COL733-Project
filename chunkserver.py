@@ -10,6 +10,9 @@ class ChunkServer(object):
         return
     
     # RECVS
+    def listen(self):
+        return
+
     def listen_client(self):
         return
     
