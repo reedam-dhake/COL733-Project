@@ -17,6 +17,9 @@ class MasterServer(object):
         return
     
     # RECVS
+    def listen(self):
+        return
+
     def listen_client(self):
         # recieve request for lease and location of replica(s) for a chunk
         # recieve filename and chunk number
