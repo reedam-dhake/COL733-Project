@@ -9,7 +9,7 @@ class Chunk:
 	def __init__(self) -> None:
 		self.version = 0
 		self.primary: tuple = None
-		self.replica: set[tuple] = {}
+		self.replica: set = set()
 
 	def update_version(self) -> None:
 		self.version += 1
