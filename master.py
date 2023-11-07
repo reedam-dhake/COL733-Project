@@ -19,14 +19,15 @@ class Master(object):
 		heartbeat_thread.start()
 		
 	def listen(self):
-		recv_req = self.connection.receive()
-
-		recv_req = json.loads(recv_req)
-		if recv_req["type"] == 7:
-			self.metadata_request_handler(recv_req)
-		else:
-			print("FATAL ERROR IN MASTER WORLD WILL END SOON")
-		return
+		while(True):
+			recv_req = self.connection.receive()
+			if recv_req == None:
+				continue
+			recv_req = json.loads(recv_req)
+			if recv_req["type"] == 7:
+				self.metadata_request_handler(recv_req)
+			else:
+				print("FATAL ERROR IN MASTER WORLD WILL END SOON")
 
 	'''
     Metadata request format: 

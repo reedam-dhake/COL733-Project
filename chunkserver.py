@@ -47,7 +47,8 @@ class ChunkServer(object):
     def listen(self):
         while(True):
             recv_req = self.connection.receive()
-
+            if recv_req == None:
+                continue
             recv_req = json.loads(recv_req)
             if recv_req["type"] == 2:
                 self.master_update_handler(recv_req)
