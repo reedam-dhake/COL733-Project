@@ -1,8 +1,10 @@
 # COL733-Project
 
-### Getting Started
+## Getting Started
 
-Use python version 3.8.0
+` make `
+
+### Use python version 3.8.0
 
 ` python3 -m venv col733env `
 
