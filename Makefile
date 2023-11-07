@@ -1,6 +1,6 @@
 # Install docker and docker-compose
 all:
-	sudo apt-get update
+#	sudo apt-get update
 	sudo apt-get install docker.io docker-compose-v2 -y
 	sudo usermod -aG docker ${USER}
 	echo "Docker and docker-compose installed"
