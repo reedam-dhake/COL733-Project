@@ -28,12 +28,12 @@ class LRUCache:
         self.size += 1
 
 class ChunkServer(object):
-    def __init__(self,host,port,chunkgrpid, primary_ip, ip_list, version_number, lease_time):
+    def __init__(self,host,port,redis_port,chunkgrpid, primary_ip, ip_list, version_number, lease_time):
         self.host = host
         self.port = port
         self.connection = KafkaClient(host,port,f"{chunkgrpid}:{host}:{port}")
         self.data_connection = KafkaClient(host,port+10,f"{chunkgrpid}:{host}:{port+10}")
-        self.rds = MyRedis(host, port)
+        self.rds = MyRedis(host, redis_port)
         self.chunkgrpid = chunkgrpid
         self.primary_ip = primary_ip
         self.ip_list = ip_list
@@ -45,28 +45,29 @@ class ChunkServer(object):
     
     # RECVS
     def listen(self):
-        recv_req = self.connection.receive()
+        while(True):
+            recv_req = self.connection.receive()
 
-        recv_req = json.loads(recv_req)
-        if recv_req["type"] == "2":
-            self.master_update_handler(recv_req)
-        elif recv_req["type"] == "5":
-            self.write_fwd_handler(recv_req)
-        elif recv_req["type"] == "6":
-            self.write_fwd_resp_handler(recv_req)
-        elif recv_req["type"] == "9":
-            self.client_write_handler(recv_req)
-        elif recv_req["type"] == "10":
-            self.client_read_handler(recv_req)
-
-        return
+            recv_req = json.loads(recv_req)
+            if recv_req["type"] == 2:
+                self.master_update_handler(recv_req)
+            elif recv_req["type"] == 5:
+                self.write_fwd_handler(recv_req)
+            elif recv_req["type"] == 6:
+                self.write_fwd_resp_handler(recv_req)
+            elif recv_req["type"] == 8:
+                self.client_write_handler(recv_req)
+            elif recv_req["type"] == 9:
+                self.client_read_handler(recv_req)
+            else:
+                print("FATAL ERROR WORLD WILL END SOON")
 
     '''
     Write request format: 
     {
-        "type": 9,
+        "type": 8,
         "sender_ip_port":"localhost:8080",
-        "sender_version": 1\,
+        "sender_version": 1,
         "chunk_handle": "100", 
         "req_id": "666666666666666"
     }
@@ -77,7 +78,7 @@ class ChunkServer(object):
     '''
     Read request format: 
     {
-        "type": 10,
+        "type": 9,
         "sender_ip_port":"localhost:8080",
         "sender_version": 1,
         "chunk_handle": "100", 
