@@ -1,5 +1,6 @@
 from socket_class import SocketClass
 from kafka_class import KafkaClient
+from mrds import MyRedis
 import json
 
 class LRUCache:
@@ -27,17 +28,17 @@ class LRUCache:
         self.size += 1
 
 class ChunkServer(object):
-    def __init__(self,host,port,chunkgrpid,valuemap):
+    def __init__(self,host,port,chunkgrpid, primary_ip, ip_list, version_number, lease_time):
         self.host = host
         self.port = port
-        self.chunkgrpid = chunkgrpid
         self.connection = KafkaClient(host,port,f"{chunkgrpid}:{host}:{port}")
-        self.is_primary = False
-        self.value_map: dict[str,tuple[str,str,str,str]] = valuemap
-        self.lease_time = -1
+        self.rds = MyRedis(host, port)
+        self.chunkgrpid = chunkgrpid
+        self.primary_ip = primary_ip
+        self.ip_list = ip_list
+        self.version_number = version_number
+        self.lease_time = lease_time
         self.buffer = LRUCache(10)
-        
-        
         return
     
     # RECVS
@@ -50,6 +51,7 @@ class ChunkServer(object):
         #     "sender_version": "1.0",
         #     "request": "data",
         # }
+        # Type can be 2,5,6,9,10
         recv_req = json.loads(recv_req)
         if recv_req["type"] == "4":
             self.listen_heartbeat(recv_req)
