@@ -2,7 +2,7 @@ from socket_class import SocketClass
 from kafka_class import KafkaClient
 from mrds import MyRedis
 from constants import *
-import json, threading, ping3
+import json, threading, uuid, time
 
 class Client(object):
 	def __init__(self,host,port,master_ip):
@@ -11,6 +11,7 @@ class Client(object):
 		self.master_ip = master_ip
 		self.cache : dict[tuple(str,str),tuple(str,list(str),str,int,int)] = {}
 		self.connection = KafkaClient(host,port,f"Client:{host}:{port}")
+		self.pending_responses : dict[str, int] = {}
 		listen_thread = threading.Thread(target=self.listen)
 		listen_thread.start()
 	
@@ -45,6 +46,8 @@ class Client(object):
     }
     '''
 	def metadata_handler(self, req):
+		del self.pending_responses[req["req_id"]]
+		self.cache[(req["filename"],req["chunk_number"])] = (req["chunk_handle"],req["ip_list"],req["primary_ip"],req["version_number"],req["lease_time"])
 		return
 
  
@@ -56,12 +59,16 @@ class Client(object):
 		"req_id": "666666666666666",
 		"status": 1
 		"message": "Success"
+		"offset": 1000
 	} 
  
 	'''
 	def write_response_handler(self, req):
-		return
-
+		del self.pending_responses[req["req_id"]]
+		if req["status"] == 1:
+			return f"Sccessful write at offset: {req['offset']}"
+		else:
+			return f"Unsuccessful write with message: {req['message']}"
 
 
 	'''
@@ -76,4 +83,58 @@ class Client(object):
 	} 
   	'''
 	def read_response_handler(self, req):
+		del self.pending_responses[req["req_id"]]
+		if req["status"] == 1:
+			return f"Sccessful read with data: {req['data']}"
+		else:
+			return f"Unsuccessful read with message: {req['message']}"
 		return
+
+	def metadata_request(self, filename, chunk_number):
+		unique_req_id = str(uuid.uuid4())
+		req = {
+			"type": 7,
+			"sender_ip_port": f"{self.host}:{self.port}",
+			"req_id": unique_req_id,
+			"filename": filename,
+			"chunk_number": chunk_number
+		}
+		self.pending_responses[unique_req_id] = time.time()
+		self.connection.send(json.dumps(req),f"Master:{self.master_ip}")
+
+	def write_request(self, filename, chunk_number, data):
+		if (filename,chunk_number) not in self.cache or self.cache[(filename,chunk_number)][4] < time.time():
+			self.metadata_request(filename,chunk_number)
+		while (filename,chunk_number) not in self.cache:
+			continue
+		
+		unique_req_id = str(uuid.uuid4())
+		data_tuple = self.cache[(filename,chunk_number)] 
+		req = {
+			"type": 8,
+			"sender_ip_port": f"{self.host}:{self.port}",
+			"sender_version": data_tuple[3],
+			"chunk_handle": data_tuple[0],
+			"req_id": unique_req_id,
+		}
+		self.pending_responses[unique_req_id] = time.time()
+		self.connection.send(json.dumps(req),f"ChunkServer:{data_tuple[2]}")
+
+	def read_request(self, filename, chunk_number, byte_range):
+		if (filename,chunk_number) not in self.cache or self.cache[(filename,chunk_number)][4] < time.time():
+			self.metadata_request(filename,chunk_number)
+		while (filename,chunk_number) not in self.cache:
+			continue
+		
+		unique_req_id = str(uuid.uuid4())
+		data_tuple = self.cache[(filename,chunk_number)] 
+		req = {
+			"type": 9,
+			"sender_ip_port": f"{self.host}:{self.port}",
+			"sender_version": data_tuple[3],
+			"req_id": unique_req_id,
+			"chunk_handle": data_tuple[0],
+			"byte_range": byte_range
+		}
+		self.pending_responses[unique_req_id] = time.time()
+		self.connection.send(json.dumps(req),f"ChunkServer:{data_tuple[2]}")

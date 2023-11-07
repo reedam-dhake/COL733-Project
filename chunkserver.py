@@ -31,8 +31,8 @@ class ChunkServer(object):
     def __init__(self,host,port,redis_port,chunkgrpid, primary_ip, ip_list, version_number, lease_time):
         self.host = host
         self.port = port
-        self.connection = KafkaClient(host,port,f"{chunkgrpid}:{host}:{port}")
-        self.data_connection = KafkaClient(host,port+10,f"{chunkgrpid}:{host}:{port+10}")
+        self.connection = KafkaClient(host,port,f"ChunkServer:{host}:{port}")
+        self.data_connection = KafkaClient(host,port+10,f"ChunkServer:{host}:{port+10}")
         self.rds = MyRedis(host, redis_port)
         self.chunkgrpid = chunkgrpid
         self.primary_ip = primary_ip
@@ -91,7 +91,7 @@ class ChunkServer(object):
         return
 
     '''
-    Read request format: 
+    Write fwd request format: 
     {
         "type": 5,
         "sender_ip_port":"localhost:8080",
