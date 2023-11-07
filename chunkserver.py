@@ -40,6 +40,7 @@ class ChunkServer(object):
         self.version_number = version_number
         self.lease_time = lease_time
         self.buffer = LRUCache(10)
+        self.pending_wrt_fwd : dict[str,int] = {}
         listen_thread = threading.Thread(target=self.listen)
         listen_thread.start()
     
@@ -74,6 +75,69 @@ class ChunkServer(object):
     }
     '''
     def client_write_handler(self, req):
+        if req["sender_version"] < self.version_number:
+            self.connection.send(
+                json.dumps(
+                    {
+                        "type": 3,
+                        "sender_ip_port": req["sender_ip_port"],
+                        "req_id": req["req_id"],
+                        "status": 1,
+                        "message": "Stale Version",
+                        "offset": 0,
+                        "chunk_handle": req["chunk_handle"]
+                    }
+                ),
+                f"Client:{req['sender_ip_port']}"
+            )
+        elif req["sender_version"] > self.version_number:
+            self.connection.send(
+                json.dumps(
+                    {
+                        "type": 3,
+                        "sender_ip_port": req["sender_ip_port"],
+                        "req_id": req["req_id"],
+                        "status": 2,
+                        "message": "Future Version",
+                        "offset": 0,
+                        "chunk_handle": req["chunk_handle"]
+                    }
+                ),
+                f"Client:{req['sender_ip_port']}"
+            )
+        else:
+            if self.primary_ip != f"{self.host}:{self.port}":
+                self.connection.send(json.dumps(req), f"ChunkServer:{self.primary_ip}")
+                print("Forwarding write request to primary")
+            else:
+                self.pending_wrt_fwd[req["req_id"]] = 3
+                req2 = req.copy()
+                req2["type"] = 5
+                data = self.buffer.get(req["req_id"])
+                if data == None:
+                    self.connection.send(
+                        json.dumps(
+                            {
+                                "type": 3,
+                                "sender_ip_port": req["sender_ip_port"],
+                                "req_id": req["req_id"],
+                                "status": 3,
+                                "message": "Data Not Recieved",
+                                "offset": 0,
+                                "chunk_handle": req["chunk_handle"]
+                            }
+                        ),
+                        f"Client:{req['sender_ip_port']}"
+                    )
+                    return
+                new_offset = self.rds.record_append(req["chunk_handle"], data, None)
+                start_offset = new_offset - len(data)
+                req2["primary_offset"] = start_offset
+                for ip in self.ip_list:
+                    if ip != f"{self.host}:{self.port}":
+                        self.connection.send(json.dumps(req2), f"ChunkServer:{ip}")
+                self.pending_wrt_fwd[req["req_id"]] = 2
+                
         return
 
     '''
@@ -88,6 +152,35 @@ class ChunkServer(object):
     }
     '''
     def client_read_handler(self, req):
+        if req["sender_version"] != self.version_number:
+            self.connection.send(
+                json.dumps(
+                    {
+                        "type": 4,
+                        "sender_ip_port": req["sender_ip_port"],
+                        "req_id": req["req_id"],
+                        "status": 1,
+                        "message": "Version Missmatch",
+                        "data": "",
+                    }
+                ),
+                f"Client:{req['sender_ip_port']}"
+            )
+        else:
+            data = self.rds.read_record(req["chunk_handle"], req["byte_range"])
+            self.connection.send(
+                json.dumps(
+                    {
+                        "type": 4,
+                        "sender_ip_port": req["sender_ip_port"],
+                        "req_id": req["req_id"],
+                        "status": 0,
+                        "message": "Success",
+                        "data": data,
+                    }
+                ),
+                f"Client:{req['sender_ip_port']}"
+            )
         return
 
     '''
@@ -98,11 +191,27 @@ class ChunkServer(object):
         "sender_version": 1,
         "chunk_handle": "100", 
         "req_id": "666666666666666"
+        "primary_offset": 0,
     }
     '''
     def write_fwd_handler(self, req):
-        return 
-
+        if req["sender_version"] != self.version_number:
+            return
+        data = self.buffer.get(req["req_id"])
+        req2 = req.copy()
+        req2["type"] = 6
+        if data == None:
+            req2["status"] = 1
+            req2["message"] = "Data Not Recieved"
+            self.connection.send(json.dumps(req2), f"ChunkServer:{self.primary_ip}")
+        else:
+            req2["status"] = 0
+            req2["message"] = "Success"
+            self.rds.record_append(req["chunk_handle"], data, req["primary_offset"])
+            self.connection.send(json.dumps(req2), f"ChunkServer:{self.primary_ip}")
+        return
+        
+        
     '''
     Write Fwd Resp request format: 
     {
@@ -110,10 +219,49 @@ class ChunkServer(object):
         "sender_ip_port":"localhost:8080",
         "sender_version": 1,
         "chunk_handle": "100", 
-        "req_id": "666666666666666"
+        "req_id": "666666666666666",
+        "status": 0,
+        "message": "Success",
+        "primary_offset": 0,
     }
     '''
     def write_fwd_resp_handler(self, req):
+        if req["sender_version"] != self.version_number:
+            return
+        if req["status"] == 0:
+            if req["req_id"] not in self.pending_wrt_fwd:
+                return
+            self.pending_wrt_fwd[req["req_id"]] -= 1
+            if self.pending_wrt_fwd[req["req_id"]] == 0:
+                self.connection.send(
+                    json.dumps(
+                        {
+                            "type": 3,
+                            "sender_ip_port": req["sender_ip_port"],
+                            "req_id": req["req_id"],
+                            "status": 0,
+                            "message": "Success",
+                            "offset": req["primary_offset"],
+                            "chunk_handle": req["chunk_handle"]
+                        }
+                    ),
+                    f"Client:{req['sender_ip_port']}"
+                )
+        else:
+            self.connection.send(
+                json.dumps(
+                    {
+                        "type": 3,
+                        "sender_ip_port": req["sender_ip_port"],
+                        "req_id": req["req_id"],
+                        "status": 3,
+                        "message": "Data Not Recieved",
+                        "offset": 0,
+                        "chunk_handle": req["chunk_handle"]
+                    }
+                ),
+                f"Client:{req['sender_ip_port']}"
+            )
         return 
 
 
@@ -131,4 +279,8 @@ class ChunkServer(object):
     }
     '''
     def master_update_handler(self, req):
+        self.primary_ip = req["primary_ip"]
+        self.ip_list = req["ip_list"]
+        self.version_number = req["version_number"]
+        self.lease_time = req["lease_time"]
         return

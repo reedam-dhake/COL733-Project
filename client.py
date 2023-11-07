@@ -48,7 +48,6 @@ class Client(object):
 	def metadata_handler(self, req):
 		del self.pending_responses[req["req_id"]]
 		self.cache[(req["filename"],req["chunk_number"])] = (req["chunk_handle"],req["ip_list"],req["primary_ip"],req["version_number"],req["lease_time"])
-		return
 
  
 	'''
@@ -57,16 +56,24 @@ class Client(object):
 		"type": 3,
 		"sender_ip_port":"localhost:8080",
 		"req_id": "666666666666666",
-		"status": 1
+		"status": 0
 		"message": "Success"
 		"offset": 1000
+		"chunk_handle": 100
 	} 
  
 	'''
 	def write_response_handler(self, req):
 		del self.pending_responses[req["req_id"]]
-		if req["status"] == 1:
+		if req["status"] == 0:
 			return f"Sccessful write at offset: {req['offset']}"
+		elif req["status"] == 1 or req["status"] == 2:
+			filename,chunk_num = req["chunk_handle"].split("::")
+			chunk_num = int(chunk_num)
+			self.metadata_request(filename,chunk_num)
+			return f"Write failed due to version mismatch. Error: {req['message']}"
+		elif req["status"] == 3:
+			return f"Write failed due to data not recieved. Error: {req['message']}"
 		else:
 			return f"Unsuccessful write with message: {req['message']}"
 
@@ -77,18 +84,17 @@ class Client(object):
 		"type": 4,
 		"sender_ip_port":"localhost:8080",
 		"req_id": "666666666666666",
-		"status": 1
+		"status": 0
 		"message": "Success"
 		"data": "Hello World"
 	} 
   	'''
 	def read_response_handler(self, req):
 		del self.pending_responses[req["req_id"]]
-		if req["status"] == 1:
+		if req["status"] == 0:
 			return f"Sccessful read with data: {req['data']}"
 		else:
 			return f"Unsuccessful read with message: {req['message']}"
-		return
 
 	def metadata_request(self, filename, chunk_number):
 		unique_req_id = str(uuid.uuid4())
@@ -103,8 +109,12 @@ class Client(object):
 		self.connection.send(json.dumps(req),f"Master:{self.master_ip}")
 
 	def write_request(self, filename, chunk_number, data):
-		if (filename,chunk_number) not in self.cache or self.cache[(filename,chunk_number)][4] < time.time():
+		if (filename,chunk_number) not in self.cache:
 			self.metadata_request(filename,chunk_number)
+		elif self.cache[(filename,chunk_number)][4] < time.time():
+			del self.cache[(filename,chunk_number)]
+			self.metadata_request(filename,chunk_number)
+   
 		while (filename,chunk_number) not in self.cache:
 			continue
 		
@@ -117,12 +127,17 @@ class Client(object):
 			"chunk_handle": data_tuple[0],
 			"req_id": unique_req_id,
 		}
+		# Send Data to buffer here
 		self.pending_responses[unique_req_id] = time.time()
 		self.connection.send(json.dumps(req),f"ChunkServer:{data_tuple[2]}")
 
 	def read_request(self, filename, chunk_number, byte_range):
-		if (filename,chunk_number) not in self.cache or self.cache[(filename,chunk_number)][4] < time.time():
+		if (filename,chunk_number) not in self.cache:
 			self.metadata_request(filename,chunk_number)
+		elif self.cache[(filename,chunk_number)][4] < time.time():
+			del self.cache[(filename,chunk_number)]
+			self.metadata_request(filename,chunk_number)
+   
 		while (filename,chunk_number) not in self.cache:
 			continue
 		

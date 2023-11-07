@@ -8,11 +8,14 @@ class MyRedis:
 		self.rds = Redis(host=host_ip, port=port_num, password='',db=0, decode_responses=False)
 		self.rds.flushall()
 
-	def wirte(self, key, value):
-		self.rds.set(key, value)
+	def record_append(self, key, value, offset):
+		if offset:
+			return self.rds.setrange(key, offset, value)
+		else:
+			return self.rds.append(key, value)
 
-	def read(self):
-		chunk = ""
-		for key in sorted(self.rds.scan_iter()):
-			chunk += self.rds.get(key).decode()
-		return chunk
+	def read_record(self,key,byte_range):
+		startbyte, endbyte = byte_range.split(":")
+		startbyte = int(startbyte)
+		endbyte = int(endbyte)
+		return self.rds.getrange(key, startbyte, endbyte).decode()
