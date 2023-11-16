@@ -20,6 +20,8 @@ class Master(object):
 		listen_thread.start()
 		heartbeat_thread = threading.Thread(target=self.heartbeat)
 		heartbeat_thread.start()
+		self.rerouting_table = {}
+		self.swim_mode = False
 		
 	def listen(self):
 		while(True):
@@ -29,6 +31,9 @@ class Master(object):
 			recv_req = json.loads(recv_req)
 			if recv_req["type"] == 7:
 				self.metadata_request_handler(recv_req)
+			elif recv_req["type"] == 13:
+				# SWIM 
+				self.swim_handler(recv_req)
 			else:
 				print("FATAL ERROR IN MASTER WORLD WILL END SOON")
 
@@ -90,14 +95,14 @@ class Master(object):
 		lease_time = future_time.strftime('%s')
 		return (primary_ip,lease_time)
 	
-		'''
+	'''
 	Iterate over chunk group and in each chunk group over the CS 
 	Send ping to all
 	If some server misses 3 pings:
 	-> Make new chunkserver
 	-> If primary: choose new primary, update version numbers, send update
 	-> Else send update (list of ips in chunk group)
-	->response on chunkserver failue :: 
+	->response on chunkserver failure :: 
 	respose_format = {
 		"type":3,
 		"sender_ip_addr":"localhost",
@@ -113,21 +118,30 @@ class Master(object):
 		miss_history = [0 for x in range(len(self.available_ips))]
 		while(True):
 			for i in range(len(self.available_ips)):
-				res = ping3.ping(self.available_ips[i],timout=5)
+				# Change ping timeout 
+				res = ping3.ping(self.available_ips[i],timeout=5)
 				if not res:
+					if self.available_ips[i] in self.rerouting_table:
+						continue
 					miss_history[i]+=1
 					continue
-				miss_history[i] = 0
+				miss_history[i] = 0					
+				self.rerouting_table.pop(self.available_ips[i])
 			for i in range(len(self.available_ips)):
 				if(miss_history[i]<3):
 					continue
+				if (swim_mode):
+					self.run_swim(self.available_ips[i])
+					# Give it another chance 
+					miss_history[i] = 0
 				self.switch_server(i,self.available_ips[i])
 				miss_history[i] = 0
 			self.update_primary_and_lease()
 
 	def switch_server(self,old_index,old_ip):
 		index = random.randrange(len(self.available_extra_ips))
-		new_ip = self.available_ips[index]
+		# new ip from available_extra_ips
+		new_ip = self.available_extra_ips[index]
 		response = {
 			"type":3,
 			"sender_ip": self.host,
@@ -165,9 +179,54 @@ class Master(object):
 			version = y[2]
 			lease = y[3]
 			now = datetime.datetime.now().strftime('%s')
-			if lease>now:
+			if lease > now:
 				continue
 			new_primary,new_lease = self.choose_primary(chunk_server_ips)
 			lease_updates[x] = (chunk_server_ips,new_primary,version,new_lease)
 		for chunk_handle,metadata in lease_updates:
 			self.chunkgrp_map[chunk_handle] = metadata
+
+	'''
+	Send a message to all chunk servers which are a part 
+	of the chunk group to run SWIM
+	Start SWIM format
+    {
+        "type": "10",
+        "sender_ip_port":"localhost:8080",
+        "sender_version": 1,
+		"suspicious_ip": "localhost:2020"
+    }
+    '''
+    def run_swim(self, suspicious_ip):
+        # Tell everyone else to start SWIM
+		for k in self.chunkgrp_map:
+			chunk_server_ips = self.chunkgrp_map[k][0]
+			if suspicious_ip not in chunk_server_ips:
+				continue
+			for ip in chunk_server_ips:
+				response = {
+					"type": 10,
+					"sender_ip_port": f"{self.host}:{self.port}",
+					"sender_version": self.chunkgrp_map[k][2],
+					"suspicious_ip": suspicious_ip
+				}
+				self.heartbeat_socket.send(json.dumps(response),ip[1],ip[0])
+			break
+		return
+
+	'''
+	SWIM HANDLER 
+	Handle responses of chunkserver on handling chunks 
+	req format = {
+		"type": 13,
+		"sender_ip_port": "localhost:8080",
+		"sus_ip": "localhost:2020"
+	}
+	'''
+
+	def swim_handler(self, req):
+		sender_ip_port = req["sender_ip_port"]
+		sus_ip = req["sus_ip"]
+		# We have received confirmation from a chunk server that the sus IP is still up
+		# We can mark it in the rerouting_table table
+		self.rerouting_table[sus_ip] = sender_ip_port

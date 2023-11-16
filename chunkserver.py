@@ -1,7 +1,8 @@
 from socket_class import SocketClass
 from kafka_class import KafkaClient
 from mrds import MyRedis
-import json, threading
+import json, threading, ping3
+from constants import *
 
 class LRUCache:
     def __init__(self, capacity: int):
@@ -28,7 +29,7 @@ class LRUCache:
         self.size += 1
 
 class ChunkServer(object):
-    def __init__(self,host,port,redis_port,chunkgrpid, primary_ip, ip_list, version_number, lease_time):
+    def __init__(self,host,port,redis_port,chunkgrpid, primary_ip, ip_list, version_number, lease_time, master_ip):
         self.host = host
         self.port = port
         self.connection = KafkaClient(host,port,f"ChunkServer:{host}:{port}")
@@ -43,6 +44,12 @@ class ChunkServer(object):
         self.pending_wrt_fwd : dict[str,int] = {}
         listen_thread = threading.Thread(target=self.listen)
         listen_thread.start()
+        # For SWIM
+        self.master_ip = master_ip
+        # SWIM SOCKET NEEDED 
+        self.swim_sock = TCPSocketClass(self.swim_port,self.host)
+        # self.pending_swim = {}
+
     
     # RECVS
     def listen(self):
@@ -61,6 +68,13 @@ class ChunkServer(object):
                 self.client_write_handler(recv_req)
             elif recv_req["type"] == 9:
                 self.client_read_handler(recv_req)
+            elif recv_req["type"] == 10:
+                # TODOLIST: Create separate thread for this 
+                self.swim_start(recv_req)
+            elif recv_req["type"] == 11: 
+                self.swim_handler(recv_req)
+            elif recv_req["type"] == 12:
+                self.swim_resp_handler(recv_req)
             else:
                 print("FATAL ERROR WORLD WILL END SOON")
 
@@ -211,7 +225,6 @@ class ChunkServer(object):
             self.connection.send(json.dumps(req2), f"ChunkServer:{self.primary_ip}")
         return
         
-        
     '''
     Write Fwd Resp request format: 
     {
@@ -264,7 +277,6 @@ class ChunkServer(object):
             )
         return 
 
-
     '''
     Master Update Format
     {
@@ -283,4 +295,59 @@ class ChunkServer(object):
         self.ip_list = req["ip_list"]
         self.version_number = req["version_number"]
         self.lease_time = req["lease_time"]
+        return
+
+    '''
+    Start swim request format:
+        {
+        "type": "10",
+        "sender_ip_port":"localhost:8080",
+        "sender_version": 1,
+		"suspicious_ip": "localhost:2020"
+        }
+    '''
+    def swim_start(self, req):
+        # Start SWIM by sending a SWIM ping request to suspicious_ip
+        sus_ip = req["suspicious_ip"].split(":")
+        self.sock.send(json.dumps({"type": 11, "sender_ip_port": f"{self.host}:{self.port}"}), 
+            sus_ip[1], sus_ip[0])
+        return
+    
+    '''
+    Swim request format:
+        {
+        "type": "11",
+        "sender_ip_port":"localhost:8080",
+        }
+    '''
+    def swim_handler(self, req):
+        ip = req["sender_ip_port"].split(":")
+        self.sock.send(
+            json.dumps(
+                {
+                    "type": 12,
+                    "sender_ip_port": f"{self.host}:{self.port}",
+                }
+            ), ip[1], ip[0])
+        return
+
+    '''
+    Swim response format:
+        {
+        "type": "12",
+        "sender_ip_port":"localhost:8080",
+        }
+    '''
+    def swim_resp_handler(self, req):
+        # Send a response to master that we have got another path to the chunkserver
+        # We have received from sus IP
+        sus_ip = req["sender_ip_port"]
+        self.sock.send(
+            json.dumps(
+                {
+                    "type": 13,
+                    "sender_ip_port": f"{self.host}:{self.port}",
+                    "sus_ip": f"{sus_ip[0]}:{sus_ip[1]}"
+                }
+            ), self.master_ip[1], self.master_ip[0])
         return

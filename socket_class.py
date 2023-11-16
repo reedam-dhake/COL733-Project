@@ -10,8 +10,8 @@ class TCPSocketClass:
         self.connections = {}
         self.recv_queue = Queue()
         self.lock = threading.Lock()
-        server_thread = threading.Thread(target=self.socket_start)
-        server_thread.start()
+        self.server_thread = threading.Thread(target=self.socket_start)
+        self.server_thread.start()
     
     def socket_start(self):
         try:

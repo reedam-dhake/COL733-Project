@@ -45,3 +45,9 @@ class File:
 		if chunk_index not in self.chunks:
 			raise Exception("Chunk not found")
 		return self.chunks[chunk_index]
+
+## SWIM CONSTANTS 
+SWIM_K = 2
+SWIM_T = 5
+SWIM_RTT = 1
+SWIM_ROUNDS = 3
