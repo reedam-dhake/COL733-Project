@@ -31,7 +31,7 @@ class TCPSocketClass:
     def send(self,msg,send_port,send_addr):
         if send_addr not in self.connections:
             try:
-                new_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                new_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM | socket.SOCK_NONBLOCK)
                 new_sock.connect((send_addr,send_port))
                 self.connections[send_addr] = new_sock
             except Exception as e:
@@ -64,3 +64,13 @@ class TCPSocketClass:
             msg = self.recv_queue.get()
             self.lock.release()
             return msg
+    
+    def ping(self,ping_addr,ping_port):
+        sock_ping_test = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock_ping_test.connect((ping_addr,ping_port))
+            sock_ping_test.close()
+            return True
+        except Exception as e:
+            sock_ping_test.close()
+            return False

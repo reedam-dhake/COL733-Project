@@ -1,27 +1,51 @@
 from socket_class import TCPSocketClass
-from kafka_class import KafkaClient
 from mrds import MyRedis
 from constants import *
-import json, threading, ping3, uuid,random,datetime
+import json, threading, uuid,random, datetime
+from collections import defaultdict
 
 class Master(object):
-	def __init__(self,host,port,heartbeat_port,redis_port,available_ips,available_extra_ips):
+	def __init__(self,host,port,redis_port):
 		self.host = host
 		self.port = port
-		self.heartbeat_port = heartbeat_port
-		self.files : dict[tuple(str,str), tuple(str,str)] = {}
-		self.chunkgrp_map : dict[str, tuple(list(tuple(str,int)), tuple(str,int), int, int)] = {}
 		self.socket = TCPSocketClass(self.port,self.host)
-		self.heartbeat_socket = TCPSocketClass(self.heartbeat_port,self.host)
+		self.heartbeat_socket = TCPSocketClass(self.port+1000,self.host)
 		self.rds = MyRedis(host, redis_port)
-		self.available_ips = available_ips
-		self.available_extra_ips = available_extra_ips
+  
+		self.extra_ips = EXTRA_CHUNKSERVER_IPS
+		self.extra_ports = EXTRA_CHUNKSERVER_TCP_PORTS
+		# chunkgrp_map format: chunk_group_id -> (chunk_server_ip_port,primary_ip_port,version,lease)
+		self.chunkgrp_map : dict[str, tuple(list(tuple(str,int)), tuple(str,int), int, int)] = {}
+		self.ip_to_grpid_map : dict[tuple(str,int), str] = {}
+  
+		self.files : dict[tuple(str,str), tuple(str,str)] = {}
+
+		self.rerouting_table = {}
+		self.swim_mode = False
+  
+		self.populate_maps()
 		listen_thread = threading.Thread(target=self.listen)
 		listen_thread.start()
 		heartbeat_thread = threading.Thread(target=self.heartbeat)
 		heartbeat_thread.start()
-		self.rerouting_table = {}
-		self.swim_mode = False
+
+	def populate_maps(self):
+		# get chunk server ips and hosts from constants.py
+		chunk_server_ips = CHUNKSERVER_IPS
+		chunk_server_ports = CHUNKSERVER_TCP_PORTS
+  
+		assert(len(chunk_server_ips) == len(chunk_server_ports))
+		assert(len(chunk_server_ips) % 3 == 0)
+  
+		for i in range(0,len(chunk_server_ips),3):
+			ips_list = []
+			chunk_group_id = str(uuid.uuid4())
+			for j in range(i,i+3):
+				ips_list.append((chunk_server_ips[j],chunk_server_ports[j]))
+				self.ip_to_grpid_map[(chunk_server_ips[j],chunk_server_ports[j])] = chunk_group_id
+			primary = random.choice(ips_list)
+			lease_time = (datetime.datetime.now() + datetime.timedelta(seconds=LEASE_TIME)).strftime('%s')
+			self.chunkgrp_map[chunk_group_id] = (ips_list,primary,1,lease_time)
 		
 	def listen(self):
 		while(True):
@@ -76,24 +100,9 @@ class Master(object):
 
 	def create_meta_record(self,filename,chunk_number):
 		chunk_handle = "{filename}:{chunk_number}".format(filename,chunk_number)
-		chunk_group_id = str(uuid.uuid4())
-		chunk_server_ip_list = self.allot_chunk_server()
-		primary_ip,lease_time = self.choose_primary(chunk_server_ip_list)
-		version = 1
-		self.chunkgrp_map[chunk_group_id] = (chunk_server_ip_list,primary_ip,version,lease_time)
+		chunk_group_id = random.choice(list(self.chunkgrp_map.keys()))
 		self.files[(filename,chunk_number)] = (chunk_handle,chunk_group_id)
 		return
-
-	def allot_chunk_server(self):
-		chunk_servers = random.sample(self.available_ips,3)
-		return chunk_servers
-	
-	def choose_primary(self,chunk_server_list):
-		primary_ip = chunk_server_list[random.randrange(len(chunk_server_list))]
-		current_time = datetime.datetime.now()
-		future_time = current_time + datetime.timedelta(seconds=600)
-		lease_time = future_time.strftime('%s')
-		return (primary_ip,lease_time)
 	
 	'''
 	Iterate over chunk group and in each chunk group over the CS 
@@ -115,77 +124,93 @@ class Master(object):
 	'''
 		
 	def heartbeat(self):
-		miss_history = [0 for x in range(len(self.available_ips))]
+		miss_history = defaultdict(int)
 		while(True):
-			for i in range(len(self.available_ips)):
+			for ip in self.ip_to_grpid_map:
 				# Change ping timeout 
-				res = ping3.ping(self.available_ips[i],timeout=5)
+				res = self.heartbeat_socket.ping(ip[0],ip[1]+1000)
 				if not res:
-					if self.available_ips[i] in self.rerouting_table:
-						continue
-					miss_history[i]+=1
+					# if ip in self.rerouting_table:
+					# 	continue
+					miss_history[ip]+=1
 					continue
-				miss_history[i] = 0					
-				self.rerouting_table.pop(self.available_ips[i])
-			for i in range(len(self.available_ips)):
-				if(miss_history[i]<3):
-					continue
-				if (swim_mode):
-					self.run_swim(self.available_ips[i])
-					# Give it another chance 
-					miss_history[i] = 0
-				self.switch_server(i,self.available_ips[i])
-				miss_history[i] = 0
+				miss_history[ip] = 0					
+				# self.rerouting_table.pop(ip)
+			for ip in self.ip_to_grpid_map:
+				if(miss_history[ip] >=3):
+					if (self.swim_mode):
+						self.run_swim(ip)
+						# Give it another chance 
+						miss_history[ip] = 0
+					self.switch_server(ip)
+					miss_history[ip] = 0
 			self.update_primary_and_lease()
 
-	def switch_server(self,old_index,old_ip):
-		index = random.randrange(len(self.available_extra_ips))
-		# new ip from available_extra_ips
-		new_ip = self.available_extra_ips[index]
-		response = {
-			"type":3,
-			"sender_ip": self.host,
-			"sender_port": self.heartbeat_port,
-			"new_server_ip_addr" : new_ip[0],
-			"new_server_port": new_ip[1],
-			"old_server_ip_addr": old_ip[0],
-			"old_server_port": old_ip[1]
-		}
-		self.heartbeat_socket.send(json.dumps(response),new_ip[1],new_ip[0])
-		self.available_ips[old_index]=new_ip
-		self.available_extra_ips[index]=old_ip
-		updates = {}
-		for x,y in self.chunkgrp_map:
-			chunk_server_ips = y[0]
-			if old_ip not in chunk_server_ips:
+	def switch_server(self,failed_ip):
+		# Make new chunk server
+		new_ip = self.extra_ips.pop()
+		new_port = self.extra_ports.pop()
+		chunkgrp_id = self.ip_to_grpid_map[failed_ip]
+		del self.ip_to_grpid_map[failed_ip]
+		self.ip_to_grpid_map[(new_ip,new_port)] = chunkgrp_id
+		# Update chunk group map
+		chunk_server_ips,version = self.chunkgrp_map[chunkgrp_id]
+		new_chunk_server_ips = []
+		for ip in chunk_server_ips:
+			if ip == failed_ip:
 				continue
-			for i in range(len(chunk_server_ips)):
-				if chunk_server_ips[i] == old_ip:
-					chunk_server_ips[i] = new_ip
-					break
-			primary_ip = y[1]
-			if primary_ip == old_ip:
-				primary_ip = new_ip
-			version = y[2]
-			lease = y[3]
-			updates[x] = (chunk_server_ips,primary_ip,version,lease)
-		for chunk_handle,metadata in updates:
-			self.chunkgrp_map[chunk_handle] = metadata
-		
+			new_chunk_server_ips.append(ip)
+		new_chunk_server_ips.append((new_ip,new_port))
+		new_version = version + 1
+		new_primary = random.choice(new_chunk_server_ips)
+		new_lease_time = (datetime.datetime.now() + datetime.timedelta(seconds=LEASE_TIME)).strftime('%s')
+		self.updates_handler(chunkgrp_id,new_version,new_primary,new_lease_time,new_chunk_server_ips)
+  
 	def update_primary_and_lease(self):
-		lease_updates = {}
-		for x,y in self.chunkgrp_map:
-			chunk_server_ips = y[0]
-			version = y[2]
-			lease = y[3]
-			now = datetime.datetime.now().strftime('%s')
-			if lease > now:
+		for ip in self.ip_to_grpid_map:
+			chunkgrp_id = self.ip_to_grpid_map[ip]
+			chunk_server_ips,primary_ip,version,lease_time = self.chunkgrp_map[chunkgrp_id]
+			if lease_time == None:
 				continue
-			new_primary,new_lease = self.choose_primary(chunk_server_ips)
-			lease_updates[x] = (chunk_server_ips,new_primary,version,new_lease)
-		for chunk_handle,metadata in lease_updates:
-			self.chunkgrp_map[chunk_handle] = metadata
+			if lease_time < datetime.datetime.now().strftime('%s'):
+				# Update primary and lease time
+				new_primary = random.choice(chunk_server_ips)
+				new_lease_time = (datetime.datetime.now() + datetime.timedelta(seconds=LEASE_TIME)).strftime('%s')
+				self.updates_handler(chunkgrp_id,version+1,new_primary,new_lease_time,chunk_server_ips)
 
+
+	'''
+	Master Update Format
+	{
+		"type": 2,
+		"sender_ip_port":"localhost:8080",
+		"sender_version": 2,
+		"req_id": "666666666666666"
+		"primary_ip": "100", 
+		"lease_time": "5" (None),
+		"version_number": 2,
+		"ip_list" : [...],
+	}
+	'''
+	def updates_handler(self,chunkgrp_id,new_version,new_primary,new_lease_time,new_chunk_server_ips):
+		self.chunkgrp_map[chunkgrp_id] = (new_chunk_server_ips,new_primary,new_version,new_lease_time)
+		# Send update to chunk servers
+		for ip in new_chunk_server_ips:
+			request = {
+				"type": 2,
+				"sender_ip_port": f"{self.host}:{self.port}",
+				"sender_version": new_version,
+				"req_id": str(uuid.uuid4()),
+				"primary_ip": new_primary,
+				"lease_time": new_lease_time,
+				"version_number": new_version,
+				"ip_list" : new_chunk_server_ips,
+			}
+			self.socket.send(json.dumps(request),ip[1],ip[0])
+		
+		
+		
+	
 	'''
 	Send a message to all chunk servers which are a part 
 	of the chunk group to run SWIM
@@ -230,3 +255,9 @@ class Master(object):
 		# We have received confirmation from a chunk server that the sus IP is still up
 		# We can mark it in the rerouting_table table
 		self.rerouting_table[sus_ip] = sender_ip_port
+
+
+if __name__ == "__main__":
+	master = Master(MASTER_ADDR,MASTER_TCP_PORT,6379)
+	
+	
