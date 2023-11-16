@@ -1,23 +1,24 @@
-from socket_class import SocketClass
+from socket_class import TCPSocketClass
 from kafka_class import KafkaClient
 from mrds import MyRedis
 from constants import *
 import json, threading, uuid, time
 
 class Client(object):
-	def __init__(self,host,port,master_ip):
+	def __init__(self,host,port,master_ip, master_port):
 		self.host = host
 		self.port = port
 		self.master_ip = master_ip
-		self.cache : dict[tuple(str,str),tuple(str,list(str),str,int,int)] = {}
-		self.connection = KafkaClient(host,port,f"Client:{host}:{port}")
+		self.master_port = master_port
+		self.cache : dict[tuple(str,str),tuple(str,list(tuple(str,int)),tuple(str,int),int,int)] = {}
+		self.tcp_socket = TCPSocketClass(self.port,self.host)
 		self.pending_responses : dict[str, int] = {}
 		listen_thread = threading.Thread(target=self.listen)
 		listen_thread.start()
 	
 	def listen(self):
 		while(True):
-			recv_req = self.connection.receive()
+			recv_req = self.tcp_socket.receive()
 			if recv_req == None:
 				continue
 			recv_req = json.loads(recv_req)
@@ -34,14 +35,15 @@ class Client(object):
     Metadata response format: 
     {
         "type": 1,
-        "sender_ip_port":"localhost:8080",
+        "sender_ip": "localhost",
+        "sender_port": 8080,
         "req_id": "666666666666666",
         "filename": "file.txt",
         "chunk_number": 53,
 		"chunk_handle": "100",
 		"version_number": 1,
-		"primary_ip": "localhost:8080",
-		"ip_list": ["localhost:8080","localhost:8081","localhost:8082"]
+		"primary_ip": ("localhost",8000)
+		"ip_list": [("localhost",8080),("localhost",8081),("localhost",8082)]
 		"lease_time": 100
     }
     '''
@@ -54,7 +56,8 @@ class Client(object):
 	Write response format: 
 	{
 		"type": 3,
-		"sender_ip_port":"localhost:8080",
+		"sender_ip":"localhost",
+		"sender_port":8080,
 		"req_id": "666666666666666",
 		"status": 0
 		"message": "Success"
@@ -82,7 +85,8 @@ class Client(object):
  	Read response format:
 	{
 		"type": 4,
-		"sender_ip_port":"localhost:8080",
+		"sender_ip":"localhost",
+		"sender_port":8080,
 		"req_id": "666666666666666",
 		"status": 0
 		"message": "Success"
@@ -100,13 +104,14 @@ class Client(object):
 		unique_req_id = str(uuid.uuid4())
 		req = {
 			"type": 7,
-			"sender_ip_port": f"{self.host}:{self.port}",
+			"sender_ip":self.host,
+			"sender_port":self.port,
 			"req_id": unique_req_id,
 			"filename": filename,
 			"chunk_number": chunk_number
 		}
 		self.pending_responses[unique_req_id] = time.time()
-		self.connection.send(json.dumps(req),f"Master:{self.master_ip}")
+		self.tcp_socket.send(json.dumps(req),self.master_ip,self.master_port)
 
 	def write_request(self, filename, chunk_number, data):
 		if (filename,chunk_number) not in self.cache:
@@ -122,14 +127,15 @@ class Client(object):
 		data_tuple = self.cache[(filename,chunk_number)] 
 		req = {
 			"type": 8,
-			"sender_ip_port": f"{self.host}:{self.port}",
+			"sender_ip":self.host,
+			"sender_port":self.port,
 			"sender_version": data_tuple[3],
 			"chunk_handle": data_tuple[0],
 			"req_id": unique_req_id,
 		}
 		# Send Data to buffer here
 		self.pending_responses[unique_req_id] = time.time()
-		self.connection.send(json.dumps(req),f"ChunkServer:{data_tuple[2]}")
+		self.tcp_socket.send(json.dumps(req),data_tuple[2][0],data_tuple[2][1])
 
 	def read_request(self, filename, chunk_number, byte_range):
 		if (filename,chunk_number) not in self.cache:
@@ -145,11 +151,12 @@ class Client(object):
 		data_tuple = self.cache[(filename,chunk_number)] 
 		req = {
 			"type": 9,
-			"sender_ip_port": f"{self.host}:{self.port}",
+			"sender_ip":self.host,
+			"sender_port":self.port,
 			"sender_version": data_tuple[3],
 			"req_id": unique_req_id,
 			"chunk_handle": data_tuple[0],
 			"byte_range": byte_range
 		}
 		self.pending_responses[unique_req_id] = time.time()
-		self.connection.send(json.dumps(req),f"ChunkServer:{data_tuple[2]}")
+		self.tcp_socket.send(json.dumps(req),data_tuple[2][0],data_tuple[2][1])

@@ -28,10 +28,10 @@ class TCPSocketClass:
         finally:
             self.sock.close()
 
-    def send(self,msg,send_port,send_addr):
+    def send(self,msg,send_addr,send_port):
         if send_addr not in self.connections:
             try:
-                new_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM | socket.SOCK_NONBLOCK)
+                new_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 new_sock.connect((send_addr,send_port))
                 self.connections[send_addr] = new_sock
             except Exception as e:

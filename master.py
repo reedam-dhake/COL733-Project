@@ -95,7 +95,7 @@ class Master(object):
 			"ip_list": ip_list,
 			"lease_time": lease_time
 		}
-		self.socket.send(json.dumps(response),sender_port,sender_ip)
+		self.socket.send(json.dumps(response),sender_ip,sender_port)
 		return
 
 	def create_meta_record(self,filename,chunk_number):
@@ -206,7 +206,7 @@ class Master(object):
 				"version_number": new_version,
 				"ip_list" : new_chunk_server_ips,
 			}
-			self.socket.send(json.dumps(request),ip[1],ip[0])
+			self.socket.send(json.dumps(request),ip[0],ip[1])
 		
 		
 		
@@ -235,7 +235,7 @@ class Master(object):
 					"sender_version": self.chunkgrp_map[k][2],
 					"suspicious_ip": suspicious_ip
 				}
-				self.heartbeat_socket.send(json.dumps(response),ip[1],ip[0])
+				self.heartbeat_socket.send(json.dumps(response),ip[0],ip[1])
 			break
 		return
 
