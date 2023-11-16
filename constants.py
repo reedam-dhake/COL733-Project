@@ -1,5 +1,14 @@
-MASTER_ADDR = '127.0.0.1'
-MASTER_PORT = 25252
+MASTER_ADDR = 'localhost'
+MASTER_TCP_PORT = 5999
+
+CHUNKSERVER_IPS = ['localhost','localhost','localhost','localhost','localhost','localhost','localhost','localhost','localhost']
+CHUNKSERVER_TCP_PORTS = [6000,6001,6002,6003,6004,6005,6006,6007,6008]
+
+EXTRA_CHUNKSERVER_IPS = ['localhost','localhost']
+EXTRA_CHUNKSERVER_TCP_PORTS = [6009,6010]
+
+LEASE_TIME = 600
+
 
 class Chunk:
 	# replica: list of tuple of IP and Port-Number
