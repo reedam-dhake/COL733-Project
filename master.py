@@ -38,16 +38,16 @@ class Master(object):
 				print("FATAL ERROR IN MASTER WORLD WILL END SOON")
 
 	'''
-    Metadata request format: 
-    {
-        "type": 7,
-        "sender_ip":"localhost",
+	Metadata request format: 
+	{
+		"type": 7,
+		"sender_ip":"localhost",
 		"sender_port":5000,
-        "req_id": "666666666666666",
+		"req_id": "666666666666666",
 		"filename": "file.txt",
 		"chunk_number": 53
-    }
-    '''
+	}
+	'''
 	def metadata_request_handler(self, req):
 		sender_ip = req["sender_ip"]
 		sender_port = req["sender_port"]
@@ -190,15 +190,15 @@ class Master(object):
 	Send a message to all chunk servers which are a part 
 	of the chunk group to run SWIM
 	Start SWIM format
-    {
-        "type": "10",
-        "sender_ip_port":"localhost:8080",
-        "sender_version": 1,
+	{
+		"type": "10",
+		"sender_ip_port":"localhost:8080",
+		"sender_version": 1,
 		"suspicious_ip": "localhost:2020"
-    }
-    '''
-    def run_swim(self, suspicious_ip):
-        # Tell everyone else to start SWIM
+	}
+	'''
+	def run_swim(self, suspicious_ip):
+		# Tell everyone else to start SWIM
 		for k in self.chunkgrp_map:
 			chunk_server_ips = self.chunkgrp_map[k][0]
 			if suspicious_ip not in chunk_server_ips:
