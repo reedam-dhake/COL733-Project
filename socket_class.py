@@ -10,8 +10,8 @@ class TCPSocketClass:
         self.connections = {}
         self.recv_queue = Queue()
         self.lock = threading.Lock()
-        self.server_thread = threading.Thread(target=self.socket_start)
-        self.server_thread.start()
+        server_thread = threading.Thread(target=self.socket_start)
+        server_thread.start()
     
     def socket_start(self):
         try:
@@ -21,7 +21,7 @@ class TCPSocketClass:
             while True:
                 client_socket, client_addr = self.sock.accept()
                 print(f"Accepted connection from {client_addr[0]}:{client_addr[1]}")
-                t = threading.Thread(target=self.listener,args=(client_socket))
+                t = threading.Thread(target=self.listener,args=(client_socket,))
                 t.start()
         except Exception as e:
             print(f"Error: {e}")
@@ -31,12 +31,13 @@ class TCPSocketClass:
     def send(self,msg,send_port,send_addr):
         if send_addr not in self.connections:
             try:
-                self.sock.connect((send_addr,send_port))
-                self.connections.add(send_addr)
+                new_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                new_sock.connect((send_addr,send_port))
+                self.connections[send_addr] = new_sock
             except Exception as e:
                 return (2,f"Error: {e}")
         try:
-            self.sock.send(msg.encode())
+            self.connections[send_addr].send(msg.encode())
         except Exception as e:
             return (1,f"Error: {e}")
         return (0,"Success")
