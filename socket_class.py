@@ -64,3 +64,13 @@ class TCPSocketClass:
             msg = self.recv_queue.get()
             self.lock.release()
             return msg
+
+    def ping(self,ping_addr,ping_port):
+        sock_ping_test = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock_ping_test.connect((ping_addr,ping_port))
+            sock_ping_test.close()
+            return True
+        except Exception as e:
+            sock_ping_test.close()
+            return False
