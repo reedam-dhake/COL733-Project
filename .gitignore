@@ -124,3 +124,6 @@ col733env/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+*.csv
+*_test.py

@@ -1,4 +1,4 @@
-from socket_class import SocketClass
+from socket_class import TCPSocketClass
 from kafka_class import KafkaClient
 from mrds import MyRedis
 import json, threading, ping3
