@@ -1,3 +1,6 @@
+CLIENT_ADDR = 'localhost'
+CLIENT_TCP_PORT = 5998
+
 MASTER_ADDR = 'localhost'
 MASTER_TCP_PORT = 5999
 

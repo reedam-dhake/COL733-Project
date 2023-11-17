@@ -5,12 +5,12 @@ import json, threading, uuid,random, datetime, time
 from collections import defaultdict
 
 class Master(object):
-	def __init__(self,host,port,redis_port):
+	def __init__(self,host,port):
 		self.host = host
 		self.port = port
 		self.socket = TCPSocketClass(self.port,self.host)
 		self.heartbeat_socket = TCPSocketClass(self.port+1000,self.host)
-		self.rds = MyRedis(host, redis_port)
+		self.rds = MyRedis(host, self.port+500)
   
 		self.extra_ips = EXTRA_CHUNKSERVER_IPS
 		self.extra_ports = EXTRA_CHUNKSERVER_TCP_PORTS

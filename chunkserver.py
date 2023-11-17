@@ -28,7 +28,7 @@ class LRUCache:
 		self.size += 1
 
 class ChunkServer(object):
-	def __init__(self,host,port,redis_port,chunkgrpid, primary_ip_port, ip_list, version_number, lease_time, master_ip):
+	def __init__(self,host,port,chunkgrpid, primary_ip_port, ip_list, version_number, lease_time, master_ip):
 		self.host = host
 		self.port = port
 		self.master_ip = master_ip
@@ -36,7 +36,7 @@ class ChunkServer(object):
 		self.tcp_socket = TCPSocketClass(self.port,self.host)
 		self.heartbeat_socket = TCPSocketClass(self.port+1000,self.host)
 		
-		self.rds = MyRedis(host, redis_port)
+		self.rds = MyRedis(host, self.port+500)
 		
 		self.chunkgrpid = chunkgrpid
 		self.primary_ip_port = primary_ip_port
@@ -57,7 +57,7 @@ class ChunkServer(object):
 	def listen(self):
 		while(True):
 			recv_req = self.tcp_socket.receive()
-			if recv_req == None:
+			if recv_req == None or len(recv_req) == 0:
 				continue
 			recv_req = json.loads(recv_req)
 			if recv_req["type"] == 2:
@@ -173,7 +173,7 @@ class ChunkServer(object):
 				self.pending_wrt_fwd[req["req_id"]] = 3
 				req2 = req.copy()
 				req2["type"] = 5
-				data = self.buffer.get(req["data_req_id"])
+				data = self.rds.get(req["data_req_id"])
 				if data == None:
 					self.tcp_socket.send(
 						json.dumps(
@@ -218,7 +218,7 @@ class ChunkServer(object):
 	def write_fwd_handler(self, req):
 		if req["sender_version"] != self.version_number:
 			return
-		data = self.buffer.get(req["data_req_id"])
+		data = self.rds.get(req["data_req_id"])
 		req2 = req.copy()
 		req2["type"] = 6
 		if data == None:

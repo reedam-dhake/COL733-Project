@@ -11,6 +11,7 @@ class Client(object):
 		self.master_ip = master_ip
 		self.master_port = master_port
 		self.cache : dict[tuple(str,str),tuple(str,list(tuple(str,int)),tuple(str,int),int,int)] = {}
+		self.rds = MyRedis(host, self.port+500)
 		self.tcp_socket = TCPSocketClass(self.port,self.host)
 		self.pending_responses : dict[str, int] = {}
 		listen_thread = threading.Thread(target=self.listen)
@@ -19,7 +20,7 @@ class Client(object):
 	def listen(self):
 		while(True):
 			recv_req = self.tcp_socket.receive()
-			if recv_req == None:
+			if recv_req == None or len(recv_req) == 0:
 				continue
 			recv_req = json.loads(recv_req)
 			if recv_req["type"] == 1:
@@ -163,31 +164,42 @@ class Client(object):
 		self.tcp_socket.send(json.dumps(req),data_tuple[2][0],data_tuple[2][1])
   
 
-	def data_forward(self, filename, chunk_number, data):
+	def data_forward(self, filename, chunk_number, start_offset):
 		# forward data to chunkserver by writing directly 
+		if (filename,chunk_number) not in self.cache:
+			self.metadata_request(filename,chunk_number)
+		elif self.cache[(filename,chunk_number)][4] < time.time():
+			del self.cache[(filename,chunk_number)]
+			self.metadata_request(filename,chunk_number)
+   
+		while (filename,chunk_number) not in self.cache:
+			continue
 
-		return
-
-
-
+		ip_list = self.cache[(filename,chunk_number)][1]
+		data_req_id = str(uuid.uuid4())
+		lua_script = """
+			local start_offset = tonumber(ARGV[1])
+			local data_read_size = tonumber(ARGV[2])
+			local send_ip = ARGV[3]
+			local send_port = tonumber(ARGV[4])
+			local new_key = ARGV[5]
+			local filename = ARGV[6]
+			local data = redis.call('getrange',filename,start_offset,start_offset+data_read_size-1)
+			redis.call('set',new_key,data)
+			redis.call('migrate',send_ip,send_port,keys={new_key},destination_db=0,copy=True,replace=True,timeout=1000000,auth='')
+			redis.call('del',new_key)
+		"""
+		for ip in ip_list:
+			self.rds.rds.eval(lua_script, 0, start_offset, DATA_SIZE, ip[0], ip[1]+500, data_req_id, filename)
+		return data_req_id
 
 	def write_data(self, filename):
-		# read data from filename and write to chunkserver
-		f = open(filename,"r")
-		# read data from file in for loop with each time reading DATA_SIZE bytes
-		# and send to write_request
+		total_bytes = self.rds.strlen(filename)
 		chunk_number = 0
-		chunk_read = 0
-		while True:
-			data = f.read(DATA_SIZE)
-			if not data:
-				break
-			chunk_read += len(data)
-			if chunk_read > CHUNK_SIZE:
-				chunk_number += 1
-				chunk_read = len(data)
-				
-			self.data_forward(filename,chunk_number,data)
-			self.write_request(filename,chunk_number,data)
-		
+		curr_offset = 0
+		while curr_offset < total_bytes:
+			data_req_id = self.data_forward(filename, chunk_number, curr_offset)
+			self.write_request(filename, chunk_number, data_req_id)
+			curr_offset += DATA_SIZE
+			chunk_number = curr_offset // CHUNK_SIZE
 		return
