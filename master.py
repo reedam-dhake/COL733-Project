@@ -1,7 +1,7 @@
 from socket_class import TCPSocketClass
 from mrds import MyRedis
 from constants import *
-import json, threading, uuid,random, datetime
+import json, threading, uuid,random, datetime, time
 from collections import defaultdict
 
 class Master(object):
@@ -141,7 +141,12 @@ class Master(object):
 					if (self.swim_mode):
 						self.run_swim(ip)
 						# Give it another chance 
-						miss_history[ip] = 0
+						# miss_history[ip] = 0
+						# Wait
+						time.sleep(4*SWIM_RTT)
+						if ip in self.rerouting_table:
+							# We have been able to find an alternate route 
+							continue
 					self.switch_server(ip)
 					miss_history[ip] = 0
 			self.update_primary_and_lease()
