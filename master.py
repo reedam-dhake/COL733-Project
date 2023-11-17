@@ -133,7 +133,7 @@ class Master(object):
 					miss_history[ip]+=1
 					continue
 				miss_history[ip] = 0
-
+			updates = []
 			for ip in self.ip_to_grpid_map:
 				if(miss_history[ip] >=3):
 					if (self.swim_mode):
@@ -145,8 +145,11 @@ class Master(object):
 						if ip in self.rerouting_table:
 							# We have been able to find an alternate route 
 							continue
-					self.switch_server(ip)
+					updates.append(self.switch_server(ip))
 					miss_history[ip] = 0
+			for update in updates:
+				del self.ip_to_grpid_map[update[0]]
+				self.ip_to_grpid_map[update[1]] = update[2]
 			self.update_primary_and_lease()
 
 	
@@ -197,8 +200,6 @@ class Master(object):
 		new_ip = self.extra_ips.pop()
 		new_port = self.extra_ports.pop()
 		chunkgrp_id = self.ip_to_grpid_map[failed_ip]
-		del self.ip_to_grpid_map[failed_ip]
-		self.ip_to_grpid_map[(new_ip,new_port)] = chunkgrp_id
 		# Update chunk group map
 		chunk_server_ips,_,version,_ = self.chunkgrp_map[chunkgrp_id]
 		new_chunk_server_ips = []
@@ -211,7 +212,8 @@ class Master(object):
 		new_primary = random.choice(new_chunk_server_ips)
 		new_lease_time = (datetime.datetime.now() + datetime.timedelta(seconds=LEASE_TIME)).strftime('%s')
 		self.updates_handler(chunkgrp_id,new_version,new_primary,new_lease_time,new_chunk_server_ips)
-  
+		return (failed_ip,(new_ip,new_port),chunkgrp_id)
+
 	def update_primary_and_lease(self):
 		for ip in self.ip_to_grpid_map:
 			chunkgrp_id = self.ip_to_grpid_map[ip]
@@ -253,8 +255,3 @@ class Master(object):
 				"ip_list" : new_chunk_server_ips,
 			}
 			self.socket.send(json.dumps(request),ip[0],ip[1])
-		
-		
-
-if __name__ == "__main__":
-	master = Master(MASTER_ADDR,MASTER_TCP_PORT,6379)
