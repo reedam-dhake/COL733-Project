@@ -7,6 +7,11 @@ MASTER_TCP_PORT = 5999
 CHUNKSERVER_IPS = ['localhost','localhost','localhost','localhost','localhost','localhost','localhost','localhost','localhost']
 CHUNKSERVER_TCP_PORTS = [6000,6001,6002,6003,6004,6005,6006,6007,6008]
 
+assert len(CHUNKSERVER_IPS) == len(CHUNKSERVER_TCP_PORTS)
+assert len(CHUNKSERVER_IPS) % 3 == 0
+
+CHUNKGROUP_IDS = [i for i in range(len(CHUNKSERVER_IPS)//3)]
+
 EXTRA_CHUNKSERVER_IPS = ['localhost','localhost']
 EXTRA_CHUNKSERVER_TCP_PORTS = [6009,6010]
 
@@ -16,6 +21,12 @@ LEASE_TIME = 600
 
 CHUNK_SIZE = 20
 DATA_SIZE = 1
+
+## SWIM CONSTANTS 
+SWIM_K = 2
+SWIM_T = 5
+SWIM_RTT = 1
+SWIM_ROUNDS = 3
 
 class Chunk:
 	# replica: list of tuple of IP and Port-Number
@@ -61,9 +72,3 @@ class File:
 		if chunk_index not in self.chunks:
 			raise Exception("Chunk not found")
 		return self.chunks[chunk_index]
-
-## SWIM CONSTANTS 
-SWIM_K = 2
-SWIM_T = 5
-SWIM_RTT = 1
-SWIM_ROUNDS = 3

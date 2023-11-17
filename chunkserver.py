@@ -1,7 +1,9 @@
+import datetime
 from socket_class import TCPSocketClass
 from mrds import MyRedis
 import json, threading
 from constants import *
+import sys
 
 class LRUCache:
 	def __init__(self, capacity: int):
@@ -387,3 +389,17 @@ class ChunkServer(object):
 			), self.master_ip[0], self.master_ip[1]
    		)
 		return
+
+if __name__ == "__main__":
+	index = int(sys.argv[1])
+	chunkgrpindex = index//3
+	ip = CHUNKSERVER_IPS[index]
+	port = CHUNKSERVER_TCP_PORTS[index]
+	ip_list = []
+	for i in range(3):
+		ip_list.append((CHUNKSERVER_IPS[chunkgrpindex*3+i],CHUNKSERVER_TCP_PORTS[chunkgrpindex*3+i]))
+	chunck_grp_id = CHUNKGROUP_IDS[chunkgrpindex]
+	primary_ip_port = (CHUNKSERVER_IPS[chunkgrpindex*3],CHUNKSERVER_TCP_PORTS[chunkgrpindex*3])
+	version_number = 0
+	lease = datetime.datetime.now() + datetime.timedelta(seconds=LEASE_TIME)
+	chunkserver = ChunkServer(ip,port,chunck_grp_id,primary_ip_port,ip_list,version_number,lease,(MASTER_ADDR,MASTER_TCP_PORT))

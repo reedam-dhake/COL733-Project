@@ -203,3 +203,9 @@ class Client(object):
 			curr_offset += DATA_SIZE
 			chunk_number = curr_offset // CHUNK_SIZE
 		return
+
+if __name__ == "__main__":
+	client = Client(CLIENT_ADDR,CLIENT_TCP_PORT,MASTER_ADDR,MASTER_TCP_PORT)
+	# you can now use this client to read and write files
+	# client.write_data("file.txt")
+	# This is not an API and is just the architecture of how the client works. You can use this to write your own API

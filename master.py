@@ -33,13 +33,13 @@ class Master(object):
 		# get chunk server ips and hosts from constants.py
 		chunk_server_ips = CHUNKSERVER_IPS
 		chunk_server_ports = CHUNKSERVER_TCP_PORTS
-  
+		
 		assert(len(chunk_server_ips) == len(chunk_server_ports))
 		assert(len(chunk_server_ips) % 3 == 0)
   
 		for i in range(0,len(chunk_server_ips),3):
 			ips_list = []
-			chunk_group_id = str(uuid.uuid4())
+			chunk_group_id = i//3
 			for j in range(i,i+3):
 				ips_list.append((chunk_server_ips[j],chunk_server_ports[j]))
 				self.ip_to_grpid_map[(chunk_server_ips[j],chunk_server_ports[j])] = chunk_group_id
@@ -255,3 +255,6 @@ class Master(object):
 				"ip_list" : new_chunk_server_ips,
 			}
 			self.socket.send(json.dumps(request),ip[0],ip[1])
+
+if __name__ == "__main__":
+	master = Master(MASTER_ADDR,MASTER_TCP_PORT)
