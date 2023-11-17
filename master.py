@@ -51,6 +51,7 @@ class Master(object):
 		while(True):
 			recv_req = self.socket.receive()
 			if recv_req == None or len(recv_req) == 0:
+				time.sleep(0.01)
 				continue
 			recv_req = json.loads(recv_req)
 			if recv_req["type"] == 7:
@@ -99,7 +100,7 @@ class Master(object):
 		return
 
 	def create_meta_record(self,filename,chunk_number):
-		chunk_handle = "{}:{}".format(filename,chunk_number)
+		chunk_handle = f"{filename}:{chunk_number}"
 		chunk_group_id = random.choice(list(self.chunkgrp_map.keys()))
 		self.files[(filename,chunk_number)] = (chunk_handle,chunk_group_id)
 		return

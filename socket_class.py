@@ -1,6 +1,7 @@
 import socket
 import threading
 from queue import Queue
+from constants import *
 
 class TCPSocketClass:
     def __init__(self,port,addr):
@@ -29,6 +30,7 @@ class TCPSocketClass:
             self.sock.close()
 
     def send(self,msg,send_addr,send_port):
+        msg = msg + REQUEST_DELIMITER
         if send_addr not in self.connections:
             try:
                 new_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -43,12 +45,18 @@ class TCPSocketClass:
         return (0,"Success")
 
     def listener(self,client_socket):
+        buffer = ""
         try:
             while True:
                 request = client_socket.recv(1024)
                 request = request.decode()
+                if len(request) == 0 and len(buffer) == 0:
+                    continue
+                buffer += request
+                one_message = buffer.split(REQUEST_DELIMITER)[0]
+                buffer = buffer[len(one_message)+len(REQUEST_DELIMITER):]
                 self.lock.acquire()
-                self.recv_queue.put(request)
+                self.recv_queue.put(one_message)
                 self.lock.release()
         except Exception as e:
             print(f"Error: {e}")
