@@ -73,102 +73,6 @@ class ChunkServer(object):
 			else:
 				print("FATAL ERROR WORLD WILL END SOON")
 				
-	def heartbeat(self):
-		while(True):
-			recv_req = self.tcp_socket.receive()
-			if recv_req == None:
-				continue
-			recv_req = json.loads(recv_req)
-			if recv_req["type"] == 10:
-				# TODOLIST: Create separate thread for this 
-				self.swim_start(recv_req)
-			elif recv_req["type"] == 11: 
-				self.swim_handler(recv_req)
-			elif recv_req["type"] == 12:
-				self.swim_resp_handler(recv_req)
-			else:
-				print("FATAL ERROR WORLD WILL END SOON")
-
-	'''
-	Write request format: 
-	{
-		"type": 8,
-		"sender_ip":"localhost",
-		"sender_port":8080,
-		"sender_version": 1,
-		"chunk_handle": "100", 
-		"req_id": "666666666666666"
-	}
-	'''
-	def client_write_handler(self, req):
-		if req["sender_version"] < self.version_number:
-			self.tcp_socket.send(
-				json.dumps(
-					{
-						"type": 3,
-						"sender_ip": req["sender_ip"],
-						"sender_port": req["sender_port"],
-						"req_id": req["req_id"],
-						"status": 1,
-						"message": "Stale Version",
-						"offset": 0,
-						"chunk_handle": req["chunk_handle"]
-					}
-				),
-				req["sender_ip"],req["sender_port"]
-			)
-		elif req["sender_version"] > self.version_number:
-			self.tcp_socket.send(
-				json.dumps(
-					{
-						"type": 3,
-						"sender_ip": req["sender_ip"],
-						"sender_port": req["sender_port"],
-						"req_id": req["req_id"],
-						"status": 2,
-						"message": "Future Version",
-						"offset": 0,
-						"chunk_handle": req["chunk_handle"]
-					}
-				),
-				req["sender_ip"],req["sender_port"]
-			)
-		else:
-			if self.primary_ip_port != (self.host,self.port):
-				self.tcp_socket.send(json.dumps(req), self.primary_ip_port[0], self.primary_ip_port[1])
-				print("Forwarding write request to primary")
-			else:
-				self.pending_wrt_fwd[req["req_id"]] = 3
-				req2 = req.copy()
-				req2["type"] = 5
-				data = self.buffer.get(req["req_id"])
-				if data == None:
-					self.tcp_socket.send(
-						json.dumps(
-							{
-								"type": 3,
-								"sender_ip": req["sender_ip"],
-								"sender_port": req["sender_port"],
-								"req_id": req["req_id"],
-								"status": 3,
-								"message": "Data Not Recieved",
-								"offset": 0,
-								"chunk_handle": req["chunk_handle"]
-							}
-						),
-						req["sender_ip"],req["sender_port"]
-					)
-					return
-				new_offset = self.rds.record_append(req["chunk_handle"], data, None)
-				start_offset = new_offset - len(data)
-				req2["primary_offset"] = start_offset
-				for ip in self.ip_list:
-					if ip != (self.host,self.port):
-						self.tcp_socket.send(json.dumps(req2), ip[0], ip[1])
-				self.pending_wrt_fwd[req["req_id"]] = 2
-				
-		return
-
 	'''
 	Read request format: 
 	{
@@ -214,6 +118,89 @@ class ChunkServer(object):
 				req["sender_ip"],req["sender_port"]
 			)
 		return
+	
+ 
+	'''
+	Write request format: 
+	{
+		"type": 8,
+		"sender_ip":"localhost",
+		"sender_port":8080,
+		"sender_version": 1,
+		"chunk_handle": "100", 
+		"req_id": "666666666666666",
+		"data_req_id": "666666666666666"
+	}
+	'''
+	def client_write_handler(self, req):
+		if req["sender_version"] < self.version_number:
+			self.tcp_socket.send(
+				json.dumps(
+					{
+						"type": 3,
+						"sender_ip": req["sender_ip"],
+						"sender_port": req["sender_port"],
+						"req_id": req["req_id"],
+						"status": 1,
+						"message": "Stale Version",
+						"offset": 0,
+						"chunk_handle": req["chunk_handle"]
+					}
+				),
+				req["sender_ip"],req["sender_port"]
+			)
+		elif req["sender_version"] > self.version_number:
+			self.tcp_socket.send(
+				json.dumps(
+					{
+						"type": 3,
+						"sender_ip": req["sender_ip"],
+						"sender_port": req["sender_port"],
+						"req_id": req["req_id"],
+						"status": 2,
+						"message": "Future Version",
+						"offset": 0,
+						"chunk_handle": req["chunk_handle"]
+					}
+				),
+				req["sender_ip"],req["sender_port"]
+			)
+		else:
+			if self.primary_ip_port != (self.host,self.port):
+				self.tcp_socket.send(json.dumps(req), self.primary_ip_port[0], self.primary_ip_port[1])
+				print("Forwarding write request to primary")
+			else:
+				self.pending_wrt_fwd[req["req_id"]] = 3
+				req2 = req.copy()
+				req2["type"] = 5
+				data = self.buffer.get(req["data_req_id"])
+				if data == None:
+					self.tcp_socket.send(
+						json.dumps(
+							{
+								"type": 3,
+								"sender_ip": req["sender_ip"],
+								"sender_port": req["sender_port"],
+								"req_id": req["req_id"],
+								"status": 3,
+								"message": "Data Not Recieved",
+								"offset": 0,
+								"chunk_handle": req["chunk_handle"]
+							}
+						),
+						req["sender_ip"],req["sender_port"]
+					)
+					return
+				new_offset = self.rds.record_append(req["chunk_handle"], data, None)
+				start_offset = new_offset - len(data)
+				req2["primary_offset"] = start_offset
+				for ip in self.ip_list:
+					if ip != (self.host,self.port):
+						self.tcp_socket.send(json.dumps(req2), ip[0], ip[1])
+				self.pending_wrt_fwd[req["req_id"]] = 2
+				
+		return
+
 
 	'''
 	Write fwd request format: 
@@ -224,13 +211,14 @@ class ChunkServer(object):
 		"sender_version": 1,
 		"chunk_handle": "100", 
 		"req_id": "666666666666666"
+		"data_req_id": "666666666666666"
 		"primary_offset": 0,
 	}
 	'''
 	def write_fwd_handler(self, req):
 		if req["sender_version"] != self.version_number:
 			return
-		data = self.buffer.get(req["req_id"])
+		data = self.buffer.get(req["data_req_id"])
 		req2 = req.copy()
 		req2["type"] = 6
 		if data == None:
@@ -253,6 +241,7 @@ class ChunkServer(object):
 		"sender_version": 1,
 		"chunk_handle": "100", 
 		"req_id": "666666666666666",
+		"data_req_id": "666666666666666",
 		"status": 0,
 		"message": "Success",
 		"primary_offset": 0,
@@ -319,6 +308,23 @@ class ChunkServer(object):
 		self.version_number = req["version_number"]
 		self.lease_time = req["lease_time"]
 		return
+
+	def heartbeat(self):
+		while(True):
+			recv_req = self.tcp_socket.receive()
+			if recv_req == None:
+				continue
+			recv_req = json.loads(recv_req)
+			if recv_req["type"] == 10:
+				# TODOLIST: Create separate thread for this 
+				self.swim_start(recv_req)
+			elif recv_req["type"] == 11: 
+				self.swim_handler(recv_req)
+			elif recv_req["type"] == 12:
+				self.swim_resp_handler(recv_req)
+			else:
+				print("FATAL ERROR WORLD WILL END SOON")
+
 
 	'''
 	Start swim request format:

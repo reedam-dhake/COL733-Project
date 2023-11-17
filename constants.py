@@ -11,6 +11,8 @@ REQUEST_DELIMITER = ":::::::"
 
 LEASE_TIME = 600
 
+CHUNK_SIZE = 20
+DATA_SIZE = 1
 
 class Chunk:
 	# replica: list of tuple of IP and Port-Number

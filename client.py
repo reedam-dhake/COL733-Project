@@ -113,7 +113,7 @@ class Client(object):
 		self.pending_responses[unique_req_id] = time.time()
 		self.tcp_socket.send(json.dumps(req),self.master_ip,self.master_port)
 
-	def write_request(self, filename, chunk_number, data):
+	def write_request(self, filename, chunk_number, data_req_id):
 		if (filename,chunk_number) not in self.cache:
 			self.metadata_request(filename,chunk_number)
 		elif self.cache[(filename,chunk_number)][4] < time.time():
@@ -132,6 +132,7 @@ class Client(object):
 			"sender_version": data_tuple[3],
 			"chunk_handle": data_tuple[0],
 			"req_id": unique_req_id,
+			"data_req_id": data_req_id
 		}
 		# Send Data to buffer here
 		self.pending_responses[unique_req_id] = time.time()
@@ -160,3 +161,33 @@ class Client(object):
 		}
 		self.pending_responses[unique_req_id] = time.time()
 		self.tcp_socket.send(json.dumps(req),data_tuple[2][0],data_tuple[2][1])
+  
+
+	def data_forward(self, filename, chunk_number, data):
+		# forward data to chunkserver by writing directly 
+
+		return
+
+
+
+
+	def write_data(self, filename):
+		# read data from filename and write to chunkserver
+		f = open(filename,"r")
+		# read data from file in for loop with each time reading DATA_SIZE bytes
+		# and send to write_request
+		chunk_number = 0
+		chunk_read = 0
+		while True:
+			data = f.read(DATA_SIZE)
+			if not data:
+				break
+			chunk_read += len(data)
+			if chunk_read > CHUNK_SIZE:
+				chunk_number += 1
+				chunk_read = len(data)
+				
+			self.data_forward(filename,chunk_number,data)
+			self.write_request(filename,chunk_number,data)
+		
+		return

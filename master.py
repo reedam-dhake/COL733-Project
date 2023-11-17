@@ -128,15 +128,12 @@ class Master(object):
 		miss_history = defaultdict(int)
 		while(True):
 			for ip in self.ip_to_grpid_map:
-				# Change ping timeout 
 				res = self.heartbeat_socket.ping(ip[0],ip[1]+1000)
 				if not res:
-					# if ip in self.rerouting_table:
-					# 	continue
 					miss_history[ip]+=1
 					continue
-				miss_history[ip] = 0					
-				# self.rerouting_table.pop(ip)
+				miss_history[ip] = 0
+
 			for ip in self.ip_to_grpid_map:
 				if(miss_history[ip] >=3):
 					if (self.swim_mode):
@@ -151,6 +148,49 @@ class Master(object):
 					self.switch_server(ip)
 					miss_history[ip] = 0
 			self.update_primary_and_lease()
+
+	
+	'''
+	Send a message to all chunk servers which are a part 
+	of the chunk group to run SWIM
+	Start SWIM format
+	{
+		"type": "10",
+		"sender_ip_port":"localhost:8080",
+		"sender_version": 1,
+		"suspicious_ip": "localhost:2020"
+	}
+	'''
+	def run_swim(self, suspicious_ip):
+		# Tell everyone else to start SWIM
+		sus_chunkgrp_id = self.ip_to_grpid_map[suspicious_ip]
+		chunk_server_ips = self.chunkgrp_map[sus_chunkgrp_id][0]
+		for ip in chunk_server_ips:
+			response = {
+				"type": 10,
+				"sender_ip_port": f"{self.host}:{self.port}",
+				"sender_version":  self.chunkgrp_map[sus_chunkgrp_id][2],
+				"suspicious_ip": suspicious_ip
+			}
+			self.heartbeat_socket.send(json.dumps(response),ip[0],ip[1])
+		return
+
+	'''
+	SWIM HANDLER 
+	Handle responses of chunkserver on handling chunks 
+	req format = {
+		"type": 13,
+		"sender_ip_port": "localhost:8080",
+		"sus_ip": "localhost:2020"
+	}
+	'''
+
+	def swim_handler(self, req):
+		sender_ip_port = req["sender_ip_port"]
+		sus_ip = req["sus_ip"]
+		# We have received confirmation from a chunk server that the sus IP is still up
+		# We can mark it in the rerouting_table table
+		self.rerouting_table[sus_ip] = sender_ip_port
 
 	def switch_server(self,failed_ip):
 		# Make new chunk server
@@ -215,53 +255,6 @@ class Master(object):
 			self.socket.send(json.dumps(request),ip[0],ip[1])
 		
 		
-		
-	
-	'''
-	Send a message to all chunk servers which are a part 
-	of the chunk group to run SWIM
-	Start SWIM format
-	{
-		"type": "10",
-		"sender_ip_port":"localhost:8080",
-		"sender_version": 1,
-		"suspicious_ip": "localhost:2020"
-	}
-	'''
-	def run_swim(self, suspicious_ip):
-		# Tell everyone else to start SWIM
-		for k in self.chunkgrp_map:
-			chunk_server_ips = self.chunkgrp_map[k][0]
-			if suspicious_ip not in chunk_server_ips:
-				continue
-			for ip in chunk_server_ips:
-				response = {
-					"type": 10,
-					"sender_ip_port": f"{self.host}:{self.port}",
-					"sender_version": self.chunkgrp_map[k][2],
-					"suspicious_ip": suspicious_ip
-				}
-				self.heartbeat_socket.send(json.dumps(response),ip[0],ip[1])
-			break
-		return
-
-	'''
-	SWIM HANDLER 
-	Handle responses of chunkserver on handling chunks 
-	req format = {
-		"type": 13,
-		"sender_ip_port": "localhost:8080",
-		"sus_ip": "localhost:2020"
-	}
-	'''
-
-	def swim_handler(self, req):
-		sender_ip_port = req["sender_ip_port"]
-		sus_ip = req["sus_ip"]
-		# We have received confirmation from a chunk server that the sus IP is still up
-		# We can mark it in the rerouting_table table
-		self.rerouting_table[sus_ip] = sender_ip_port
-
 
 if __name__ == "__main__":
 	master = Master(MASTER_ADDR,MASTER_TCP_PORT,6379)

@@ -1,5 +1,5 @@
 import socket
-import threading
+import threading, time
 from queue import Queue
 from constants import *
 
@@ -35,12 +35,15 @@ class TCPSocketClass:
             try:
                 new_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 new_sock.connect((send_addr,send_port))
+                new_sock.setblocking(0)
                 self.connections[send_addr] = new_sock
             except Exception as e:
+                print(f"Error123: {e}")
                 return (2,f"Error: {e}")
         try:
             self.connections[send_addr].send(msg.encode())
         except Exception as e:
+            print(f"Error542: {e}")
             return (1,f"Error: {e}")
         return (0,"Success")
 
